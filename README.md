@@ -6,3 +6,5 @@ Use 'main' to reproduce figures and model comparison from manuscript. All origin
 'PSE ANOVA' is for the frequentist statistics reported in the manuscript. 
 
 The stimulus images (pixel value matrices) have been removed from the raw data files because of space limitations here, but I'm happy to send them to anyone interested.
+
+lukehuszar@gmail.com
