@@ -1,5 +1,5 @@
 # HuszarVizelCarrasco2023
- Data &amp; code for plots and analysis from content discussed in manuscript 
+ Data &amp; code for plots and analysis from content discussed in the manuscript "Transient increases to apparent contrast by exogenous attention persist in visual working memory" by Luke Huszar, Tair Vizel & Marisa Carrasco (2023).
 
 Use 'main.m' to reproduce figures and model comparison from manuscript. All original code is heavily commented, including functions used throughout, to help readers follow along with the contents of the manuscript. Depends on the  [VBA Toolbox](https://mbb-team.github.io/VBA-toolbox/wiki/BMS-for-group-studies/) and [cbrewer2](https://github.com/scottclowe/cbrewer2) - both of which are included in '3rd party toolboxes'.
 
