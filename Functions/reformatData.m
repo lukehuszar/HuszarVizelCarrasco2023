@@ -1,0 +1,254 @@
+function [] = reformatData(subNames)
+%% Description
+%{
+Loads the raw data files (output from experimental code) for each observer
+given in 'subNames'. Extracts the relevant information for analysis and
+visualization, as well as computing summary statistics. The reformatted
+data is saved into one file for ease of use in other scripts. 
+
+Also exports matrices for use in R. This is where the reported ANOVA and
+t-tests are conducted.
+%}
+
+%% Summary statistics: defining collector matrices
+%{
+Collectors are 3D: observer (8) x cue cond (3) x contrast diff level (7)
+
+Collector prefix key:
+'pcf'    -> probability to choose first stim as higher contrast
+'params' -> parameters of cumulative normal psychometric function fits to
+            p(choose first) data
+%}
+
+% Main dependent measure: collapsed across duration
+pcf_ord_ALL = nan(length(subNames),3,7);
+params_ord_ALL = nan(length(subNames),3,5);
+
+% Separate collectors for short (0.5s) vs long (2s) duration
+pcf_ord_short_ALL = nan(length(subNames),3,7);
+pcf_ord_long_ALL = nan(length(subNames),3,7);
+params_ord_short_ALL = nan(length(subNames),3,5);
+params_ord_long_ALL = nan(length(subNames),3,5);
+
+%% Define large collector matrix for reformatting and concatenating raw data
+%{
+This matrix collects only the necessary information from each observers'
+raw data files and organizes them into a singular matrix for ease of use.
+This is only the data needed for the analyses described in the manuscript;
+appearance responses based on stimulus order, collapsed across duration.
+Other data (e.g., performance on the orientation task, RT, duration seperated,
+test/standard format), is available in the raw data file (description of
+vars in loop below)
+
+The matrix is 3D: observer (8) x data type (4) x trial number (2016)
+
+The organization of the 2nd dimension (data type) is as follows:
+conLvl    -> first - second log contrast level
+cueCondFS -> cue condition by first/second stimuli (1 = 1st cued, 2 = 2nd
+             cued, 3 = both cued)
+duration  -> delay duration (0.5 or 2s)
+appRespFS -> contrast judgement response by first/second stimuli; chose
+             first higher contrast = 1, else 0
+%}
+
+% Initialize matrix
+rawData_ALL = nan(length(subNames),4,2016);
+% Key for 2nd dimension
+rawDataKey = {'conLvl','cueCondFS','duration','appRespFS'};
+
+%% Additional steps needed for handling/loading data
+
+% Path and filename info for loading data
+rootDir = pwd;         
+dataDir = [rootDir,'\','Data\raw data']; 
+fileGet = 'AttAppSTM_*.mat'; 
+
+% Key-code information:
+% Used for translating observer key-presses on each trial into one of the
+% four possible response types (contrast response x orientation response)
+respButtons = [29 27 54 55];       % Keycodes for response keys [z x . /]
+firstStimLeft   = respButtons(1);  % z (1st stim higher contrast, 2nd stim left offset)
+firstStimRight  = respButtons(2);  % x (1st stim higher contrast, 2nd stim right offset)
+secondStimLeft  = respButtons(3);  % . (2nd stim higher contrast, 2nd stim left offset)
+secondStimRight = respButtons(4);  % / (2nd stim higher contrast, 2nd stim right offset)
+
+%% Loop through each observer
+for ii = 1:length(subNames)
+    
+    % Get the observer ID and print to console
+    subj = subNames{ii};
+    disp(' ')
+    disp('===========================================================')
+    disp(['Subject ' num2str(ii) ' of ' num2str(length(subNames))]);
+    disp('===========================================================')
+       
+    subjDir=[dataDir,'\', subj,'\'];        % Get path for loading observers data
+    fileResName   = dir([subjDir,fileGet]); % Get names for 3 session data files
+    nResFiles     = length(fileResName);    % Number of session data files
+
+    % Initialize vectors for collecting raw data across
+    % experimental sessions (2016 trials total, 672 per session).
+    % NOTE: experiment output was coded by test/standard stimulus, rather
+    % than first/second. The collectors below are used to derive the
+    % first/second format later on.
+    testLvl   = nan(1,2016);  % Test stimulus contrast
+    cueCondTS = nan(1,2016);  % Cue condition test/standard (1 = test cued, 2 = standard cued, 3 = both cued)
+    orderTS   = nan(1,2016);  % Order of test/standard (1 = test first, 2 = test second)
+    duration  = nan(1,2016);  % Duration of delay (0.5s or 2s)
+    appRespTS = nan(1,2016);  % Appearance judgement response of test/standard (1 = test higher contrast, else 0)
+    oriResp   = nan(1,2016);  % Reported orientation of 2nd stimulus relative to first (1 = CCW, 2 = CW)
+    trialInds = 1:672;        % Used for indexing when looping through session files
+    
+
+    % Loop through each session for observer, display progress
+    disp('%%% Looping through sessions and concatting.... %%%')
+    for ifile = 1:nResFiles
+        disp(['Concat file ' num2str(ifile) ' of ' num2str(nResFiles)])
+        disp(['filename = ' fileResName(ifile).name])
+        
+        dat = load([subjDir fileResName(ifile).name]); % Load file   
+        
+        % Trials are aborted if fixation is broken, so we want only want
+        % the indeces of trials that were completed
+        idone = find(dat.real_sequence.trialDone == 1); 
+        
+        % These are not the only variables stored in each data file. RT,
+        % tiltOffset, iscor (correct on ori discrim) - are also available
+        % in these files if desired
+        testLvl(trialInds)  = dat.real_sequence.testContrast(idone);
+        cueCondTS(trialInds)  = dat.real_sequence.scue(idone);
+        orderTS(trialInds)  = dat.real_sequence.order(idone);
+        duration(trialInds)  = dat.real_sequence.duration(idone);
+        appRespTS(trialInds)  = dat.real_sequence.app(idone);
+        oriResp(trialInds)  = dat.real_sequence.resp(idone);
+        
+        trialInds = trialInds + 672; % Increment indeces for next file
+    end
+    
+    %% Reformat orientation response data
+    
+    % Recode orientation response from keycodes to 1 = CCW, 2 = CW
+    oriResp(oriResp == firstStimLeft | oriResp == secondStimLeft) = 1;
+    oriResp(oriResp == firstStimRight | oriResp == secondStimRight) = 2;
+    
+    %% Reformat appearance data to first/second stimulus 
+    % Get a vector of the 7 unique test contrast levels  
+    testC = unique(testLvl);  
+    
+    % Convert appearance judgement response to be order-based 
+    % (1 = first higher contrast, else 0) 
+    appRespFS = nan(1,numel(appRespTS));
+    appRespFS(orderTS==1) = appRespTS(orderTS==1) == 1;
+    appRespFS(orderTS==2) = appRespTS(orderTS==2) == 0;
+    
+    % Get log contrast differences between first and second stimuli for order-based analysis
+    conLvl = nan(1,numel(testLvl));
+    conLvl(orderTS==1) = log10(testLvl(orderTS==1)) - log10(testC(4));
+    conLvl(orderTS==2) = log10(testC(4)) - log10(testLvl(orderTS==2));
+    conLvl = round(conLvl,2); % round to 2 sig figs
+    ordC = unique(conLvl);    % vector of the 7 possible contrast difference levels for later use
+
+    % Get the order-based cue conditions
+    % 1 = first-cued, 2 = second-cued, 3 = both-cued
+    cueCondFS = nan(1,numel(cueCondTS));
+    cueCondFS(cueCondTS==1 & orderTS==1) = 1;
+    cueCondFS(cueCondTS==2 & orderTS==2) = 1;
+    cueCondFS(cueCondTS==1 & orderTS==2) = 2;
+    cueCondFS(cueCondTS==2 & orderTS==1) = 2;
+    cueCondFS(cueCondTS==3) = 3;
+    
+    %% Fit cumulative normal psychometric functions
+    %{
+    Each observers p(choose first) across contrast difference levels is fit
+    with a cumulative normal function - 1 for each of the 3 cue conditions.
+    The cumulative normal functions have 4 free parameters for each of the
+    3 conditions. 
+    These fits are used in the first analysis reported in the manuscript -
+    'all free' - specifically, the PSE parameters are used in an ANOVA.
+    These fits are not used for the model comparison.
+    %}
+    
+    % Collectors required for fitting
+    % tot = # of trials where first stimulus was chosen as higher contrast per contrast and cue condition
+    totL = nan(3,7);  % Long duration
+    totS = nan(3,7);  % Short duration
+    totA = nan(3,7);  % Collapsed duration
+    % outOf = total number of trials per contrast and cue condition
+    outOfL = nan(3,7); % Long duration
+    outOfS = nan(3,7); % Short duration
+    outOfA = nan(3,7); % Collapsed duration
+    
+    % A guess for the upper and lower bounds (and starting value)
+    % of the PSE for fmincon, used for all conditions. 
+    pseGuess = [-0.3 0 0.3];
+    
+    % Loop through each condition and save summary stats
+    for sc = 1:3 % For each of 3 cue conditions
+        for cc = 1:numel(ordC) % For each of 7 contrast levels
+            % Select indeces for current condition for short delay, long
+            % delay, and collapsed delay respectively
+            sfilt = (conLvl == ordC(cc) & cueCondFS == sc & duration == 0.5); 
+            lfilt = (conLvl == ordC(cc) & cueCondFS == sc & duration == 2.0); 
+            afilt = (conLvl == ordC(cc) & cueCondFS == sc);             
+            % Get proportion of (choose first) for each delay type for this condition
+            pcf_ord_short_ALL(ii,sc,cc) = mean(appRespFS(sfilt));            
+            pcf_ord_long_ALL(ii,sc,cc) = mean(appRespFS(lfilt));
+            pcf_ord_ALL(ii,sc,cc) = mean(appRespFS(afilt));
+            % Get # of (choose first) for each delay type for this condition
+            totL(sc,cc) = sum(lfilt);
+            totS(sc,cc) = sum(sfilt);
+            totA(sc,cc) = sum(afilt);
+            % Get total # of trials per delay type for this condition
+            outOfS(sc,cc) = sum(appRespFS(sfilt));
+            outOfL(sc,cc) = sum(appRespFS(lfilt));
+            outOfA(sc,cc) = sum(appRespFS(afilt));
+        end
+        % Fit psychometric functions for each delay type for this cue
+        % condition
+        params_ord_short_ALL(ii,sc,:) = fitCumNormalPF(ordC, outOfS(sc,:), totS(sc,:), pseGuess);
+        params_ord_long_ALL(ii,sc,:) = fitCumNormalPF(ordC, outOfL(sc,:), totL(sc,:), pseGuess);
+        params_ord_ALL(ii,sc,:) = fitCumNormalPF(ordC, outOfA(sc,:), totA(sc,:), pseGuess);
+    end
+    
+    %% Concat relevant raw data to collector matrix
+    rawData_ALL(ii,:,:) = [conLvl' cueCondFS' duration' appRespFS']';
+
+end
+
+%% Save to one file, to use for all other analyses
+save('Data\appSTMData.mat',... 
+    'pcf_ord_short_ALL','pcf_ord_long_ALL','params_ord_short_ALL','params_ord_long_ALL',...
+    'ordC','rawData_ALL','pcf_ord_ALL','params_ord_ALL','rawDataKey','oriResp');
+
+%% Export matrices for ANOVA + T-test in R
+% PSEs collapsed across duration
+ct = 1;                           % Count for indexing
+PSEsR = nan(numel(subNames)*3,3); % rows = number of observers * number of cue conds
+for ii = 1:numel(subNames)        % For # of observers
+    for sc = 1:3                  % For # of cue conditons
+        PSEsR(ct,:) = [ii sc squeeze(params_ord_ALL(ii,sc,end))];
+        ct = ct + 1;
+    end
+end
+
+% PSEs cwith seperate duration
+ct = 1;                                     % Count for indexing
+PSEsRDuration = nan(numel(subNames)*3*2,4); % rows = number of observers * number of cue conds * number of durations
+for ii = 1:numel(subNames)                  % For # of observers
+    for sc = 1:3                            % For # of cue conditons
+        for dd = 1:2                        % For # of durations
+            if dd == 1                      % If shorter duration
+                PSEsRDuration(ct,:) = [ii sc dd squeeze(params_ord_short_ALL(ii,sc,end))];
+            else                            % If longer duration
+                PSEsRDuration(ct,:) = [ii sc dd squeeze(params_ord_long_ALL(ii,sc,end))];
+            end
+            ct = ct + 1;
+        end
+    end
+end
+
+save('Data\PSERData.mat','PSEsRDuration','PSEsR');
+
+end
+
+
